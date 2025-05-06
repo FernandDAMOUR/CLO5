@@ -1,0 +1,24 @@
+---
+- name: Deploy Kubernetes master
+  hosts: master
+  become: "{{ 'false' if inventory_hostname == 'localhost' else 'true' }}"
+  roles:
+    - kubernetes
+
+- name: Deploy Kubernetes nodes
+  hosts: workers
+  become: "{{ 'false' if inventory_hostname == 'localhost' else 'true' }}"
+  roles:
+    - kubernetes
+
+- name: Déployer SonarQube sur le cluster (sur le master)
+  hosts: master
+  become: yes
+  roles:
+    - SonarQube
+
+- name: Deploy NFS server
+  hosts: gitlab
+  become: yes
+  roles:
+    - nfs_server

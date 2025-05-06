@@ -1,0 +1,195 @@
+---
+- name: Check if users exist
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ item.name }}"
+  loop: "{{ users }}"
+  register: user_check
+  failed_when: false
+
+- name: Create users if they don't exist
+  ansible.builtin.user:
+    name: "{{ users[index].name }}"
+    password: "{{ users[index].password }}"
+    shell: /bin/bash
+    create_home: yes
+    groups: sudo
+    append: yes
+    state: present
+  loop: "{{ range(0, users | length) | list }}"
+  loop_control:
+    loop_var: index
+  when: user_check.results[index].ansible_facts.getent_passwd is not defined
+  become: true
+
+- name: Set hostname
+  ansible.builtin.hostname:
+    name: "{{ inventory_hostname }}"
+
+- name: Update /etc/hosts
+  ansible.builtin.lineinfile:
+    path: /etc/hosts
+    regexp: '^127\.0\.1\.1'
+    line: "127.0.1.1 {{ inventory_hostname }}"
+    state: present
+
+- name: Update apt index
+  apt:
+    update_cache: yes
+  changed_when: false
+  tags: prerequisites
+
+- name: Install APT dependencies
+  apt:
+    name:
+      - curl
+    state: present
+  tags: prerequisites
+
+- name: Get k3s installed version
+  ansible.builtin.command: k3s --version
+  register: k3s_version_output
+  changed_when: false
+  ignore_errors: true
+  failed_when: False
+
+- name: Set k3s installed version
+  when: not ansible_check_mode and k3s_version_output.rc == 0
+  ansible.builtin.set_fact:
+    installed_k3s_version: "{{ k3s_version_output.stdout_lines[0].split(' ')[2] }}"
+
+- name: Download artifact only if needed
+  when: (not ansible_check_mode and k3s_version_output.rc != 0) or (not ansible_check_mode and installed_k3s_version != k3s_version)
+  block:
+    - name: Download K3s install script
+      ansible.builtin.get_url:
+        url: https://get.k3s.io/
+        timeout: 120
+        dest: /usr/local/bin/k3s-install.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Run K3s install script for server
+      when: node_type == 'server'
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s-install.sh
+      environment:
+        k3S_VERSION: "{{ k3s_version }}"
+        K3S_NODE_NAME: "{{ inventory_hostname }}"
+
+    - name: Load token from file
+      when: node_type == 'agent'
+      set_fact:
+        token: "{{ lookup('file', './tmp/k3s_token.txt') }}"
+      delegate_to: localhost
+      run_once: true
+      become: false
+
+    - name: Run K3s install script (agent)
+      when: node_type == 'agent'
+      ansible.builtin.command:
+        cmd: /usr/local/bin/k3s-install.sh
+      environment:
+        K3S_URL: "https://{{ hostvars[groups['master'][0]].ansible_host }}:{{ api_port }}"
+        K3S_TOKEN: "{{ token }}"
+        K3S_NODE_NAME: "{{ inventory_hostname }}"
+        k3S_VERSION: "{{ k3s_version }}"
+
+- name: Get kubernetes server token
+  when: node_type == 'server'
+  block:
+    - name: Start K3s if not already running
+      ansible.builtin.systemd:
+        name: k3s
+        daemon_reload: true
+        state: started
+        enabled: true
+
+    - name: Ensure local tmp directory exists
+      file:
+        path: "./tmp"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      become: false
+
+    
+    - name: Wait for token file
+      ansible.builtin.wait_for:
+        path: /var/lib/rancher/k3s/server/node-token
+
+    - name: Read token
+      ansible.builtin.slurp:
+        src: /var/lib/rancher/k3s/server/node-token
+      register: node_token
+
+    - name: Set token fact
+      ansible.builtin.set_fact:
+        k3s_token: "{{ node_token.content | b64decode | regex_replace('\n', '') }}"
+        
+    - name: Save token to file
+      copy:
+        content: "{{ k3s_token }}"
+        dest: "./tmp/k3s_token.txt"
+        mode: '0755'
+      become: false
+      delegate_to: localhost
+      run_once: true
+
+- name: Create the .kube directory for all users
+  become: true
+  ansible.builtin.file:
+    path: "/home/{{ item.name }}/.kube"
+    state: directory
+    owner: "{{ item.name }}"
+    group: "{{ item.name }}"
+    mode: '0755'
+  when: inventory_hostname in groups['master']
+  loop: "{{ users }}"
+  tags: cluster
+
+- name: Vérifier si ~/.kube/config est un lien symbolique
+  stat:
+    path: "/home/{{ user.name }}/.kube/config"
+  register: kubeconfig_stat
+  loop: "{{ users }}"
+  loop_control:
+    loop_var: user
+  when: inventory_hostname in groups['master']
+
+- name: Créer un lien symbolique vers k3s.yaml dans .kube/config (partagé entre tous)
+  file:
+    src: /etc/rancher/k3s/k3s.yaml
+    dest: "/home/{{ user.name }}/.kube/config"
+    state: link
+    force: true
+  when:
+    - inventory_hostname in groups['master']
+    - kubeconfig_stat.results[loop.index0].stat.islnk is not defined or not kubeconfig_stat.results[loop.index0].stat.islnk
+    - kubeconfig_stat.results[loop.index0].stat.lnk_source is not defined or kubeconfig_stat.results[loop.index0].stat.lnk_source != '/etc/rancher/k3s/k3s.yaml'
+  loop: "{{ users }}"
+  loop_control:
+    loop_var: user
+  tags: cluster
+
+- name: Ensure k3s.yaml is readable by users
+  file:
+    path: /etc/rancher/k3s/k3s.yaml
+    mode: '0644'
+    owner: root
+    group: root
+  when: inventory_hostname in groups['master']
+  tags: cluster
+
+- name: add KUBECONFIG in ~/.bashrc for all users
+  ansible.builtin.lineinfile:
+    path: "/home/{{ item.name }}/.bashrc"
+    line: 'export KUBECONFIG=$HOME/.kube/config'
+    create: yes
+    state: present
+  when: inventory_hostname in groups['master']
+  loop: "{{ users }}"
+  tags: cluster
+

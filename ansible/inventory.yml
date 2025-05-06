@@ -1,0 +1,24 @@
+all:
+  children:
+    master:
+      hosts:
+        master-01:
+          ansible_host: 192.168.100.123
+          ansible_user: '{{master_01_user}}'
+          ansible_sudo_pass: '{{master_01_password}}'
+    workers:
+      hosts:
+        worker-01:
+          ansible_host: 192.168.100.124
+          ansible_user: '{{worker_01_user}}'
+          ansible_sudo_pass: '{{worker_01_password}}'
+        worker-02:
+          ansible_host: 192.168.100.125
+          ansible_user: '{{worker_02_user}}'
+          ansible_sudo_pass: '{{worker_02_password}}'
+    gitlab:
+      hosts:
+        gitlab_01:
+          ansible_host: 192.168.100.126
+          ansible_user: '{{gitlab_user}}'
+          ansible_sudo_pass: '{{gitlab_password}}'

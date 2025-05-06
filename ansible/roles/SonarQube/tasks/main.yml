@@ -1,0 +1,37 @@
+- name: Copier le chart Helm SonarQube vers le nœud cible
+  ansible.builtin.copy:
+    src: "{{ local_chart_path }}/"
+    dest: "{{ remote_chart_path }}/"
+    owner: '{{ gitlab_user }}'
+    group: '{{ gitlab_user }}'
+    mode: '0755'
+
+- name: Installer Helm sur le nœud cible (si non présent)
+  ansible.builtin.shell: |
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  args:
+    creates: /usr/local/bin/helm
+
+- name: Ensure pip3 is installed
+  become: true
+  ansible.builtin.package:
+    name: python3-pip
+    state: present
+
+- name: Ensure PyYAML is installed
+  become: true
+  ansible.builtin.pip:
+    name: PyYAML
+    executable: pip3
+    extra_args: --break-system-packages
+
+
+- name: Déployer SonarQube via Helm avec le chart personnalisé
+  kubernetes.core.helm:
+    name: "{{ release_name }}"
+    chart_ref: "{{ remote_chart_path }}"
+    release_namespace: "{{ namespace }}"
+    create_namespace: true
+  environment:
+    KUBECONFIG: "/home/{{ item.name }}/.kube/config"
+  loop: '{{ users }}'

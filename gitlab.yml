@@ -1,0 +1,11 @@
+- name: Install and Configure GitLab
+  hosts: gitlab
+  become: true
+  roles:
+    - install_gitlab
+
+- name: Configure GitLab Runners
+  hosts: gitlab_runners
+  become: true
+  roles:
+    - gitlab_runners

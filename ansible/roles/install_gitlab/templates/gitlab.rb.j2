@@ -1,0 +1,25 @@
+external_url 'http://{{ ansible_host }}'
+gitlab_rails['gitlab_email_enabled'] = false
+gitlab_rails['gitlab_confirm_enabled'] = false
+gitlab_rails['smtp_enable'] = false
+gitlab_rails['gitlab_signup_enabled'] = false
+puma['worker_processes'] = 2
+sidekiq['concurrency'] = 5
+postgresql['shared_buffers'] = "256MB"
+gitlab_rails['initial_root_password'] = "{{gitlab_initial_root_pass}}"
+gitlab_rails['display_initial_root_password'] = false
+gitlab_rails['store_initial_root_password'] = false
+registry_external_url 'http://{{ ansible_host }}:5050'
+registry['enable'] = true
+gitlab_rails['registry_enabled'] = true
+
+letsencrypt['enable'] = false
+
+nginx['enable'] = true
+nginx['client_max_body_size'] = '250m'
+# nginx['redirect_http_to_https'] = true
+# nginx['redirect_http_to_https_port'] = 80
+# nginx['listen_https'] = true
+# nginx['ssl_certificate'] = "/etc/gitlab/trusted-certs/gitlab.crt"
+# nginx['ssl_certificate_key'] = "/etc/gitlab/trusted-certs/gitlab.key"
+# nginx['ssl_protocols'] = "TLSv1.2 TLSv1.3"

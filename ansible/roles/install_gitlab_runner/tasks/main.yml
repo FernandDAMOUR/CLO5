@@ -1,0 +1,85 @@
+- name: Update and upgrade apt packages
+  become: true
+  apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400
+
+- name: Install required packages
+  ansible.builtin.apt:
+    name: "{{ item }}" 
+    state: present
+  loop_control:
+    loop_var: item
+  loop:
+    - curl
+    
+- name: Add GitLab Runner APT repository
+  ansible.builtin.shell: |
+    curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | bash
+  args:
+    creates: /etc/apt/sources.list.d/runner_gitlab-runner.list
+
+- name: Install GitLab Runner package
+  become: true
+  ansible.builtin.apt:
+    name: gitlab-runner
+    state: present
+    update_cache: yes
+
+- name: Vérifier si le runner est déjà enregistré
+  ansible.builtin.shell: |
+    grep -q 'name = "{{ inventory_hostname }}"' /etc/gitlab-runner/config.toml
+  register: runner_check
+  failed_when: false
+  changed_when: false  
+
+- name: Déterminer le ou les tags à passer au runner
+  ansible.builtin.set_fact:
+    runner_tags: >-
+      {{ 'docker' if 'workers' in group_names else 'kubctl' if 'masters' in group_names else '' }}
+
+- name: Register GitLab Runner via CLI (shell)
+  ansible.builtin.command: >
+    gitlab-runner register
+      --url "http://{{ hostvars['gitlab_01'].ansible_host }}/"
+      --executor shell
+      --description "{{ inventory_hostname }}"
+      --registration-token "{{ runner_registration_token }}"
+      {% if runner_tags %}
+      --tag-list "{{ runner_tags }}"
+      {% endif %}
+      --non-interactive
+  when:
+    - runner_check.rc != 0
+    - runner_tags != ''
+
+- block:
+    - name: Mettre à jour le cache APT
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Créer le répertoire pour les keyrings APT
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+  when: inventory_hostname in groups['workers']
+
+- name: Installer les paquets prérequis
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+
+- name: add users to docker group
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: yes
+  loop:
+    - gitlab-runner
+  when: inventory_hostname in groups['workers']

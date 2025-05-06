@@ -1,0 +1,12 @@
+- name: Deploy GitLab Runners
+  hosts: 
+    - master
+    - worker-01
+  become: yes
+  roles:
+    - install_gitlab_runner
+- name: Deploy the project
+  hosts: 
+    - localhost
+  roles:
+    - init_repo

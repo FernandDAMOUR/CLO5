@@ -1,0 +1,121 @@
+- name: "Get numeric namespace ID for quantum"
+  ansible.builtin.uri:
+    url: "http://{{ hostvars['gitlab_01'].ansible_host }}/api/v4/namespaces?search=quantum"
+    method: GET
+    headers:
+      PRIVATE-TOKEN: "{{ access_token }}"
+    return_content: yes
+  register: namespace_search
+
+- name: "Fail if namespace quantum not found"
+  ansible.builtin.fail:
+    msg: "Namespace quantum not found"
+  when: namespace_search.json | length == 0
+
+- name: "Set namespace_id fact"
+  ansible.builtin.set_fact:
+    namespace_id: "{{ namespace_search.json[0].id }}"
+
+- name: "List all projects in namespace 'quantum'"
+  ansible.builtin.uri:
+    url: "http://{{ hostvars['gitlab_01'].ansible_host }}/api/v4/projects?namespace_id={{ namespace_id }}&per_page=100"
+    method: GET
+    headers:
+      PRIVATE-TOKEN: "{{ access_token }}"
+    return_content: yes
+  register: project_list
+
+- name: "Filter projects matching 'quantum'"
+  ansible.builtin.set_fact:
+    matching_projects: >-
+      {{ project_list.json
+         | selectattr('name','equalto', 'quantum')
+         | list }}
+
+- name: "Set project existence flag and repo_http_url"
+  ansible.builtin.set_fact:
+    project_exists: "{{ matching_projects | length > 0 }}"
+    repo_http_url: >-
+      {{ matching_projects[0].http_url_to_repo if (matching_projects | length > 0) else '' }}
+
+- name: "Create GitLab project via API if missing"
+  ansible.builtin.uri:
+    url: "http://{{ hostvars['gitlab_01'].ansible_host }}/api/v4/projects"
+    method: POST
+    headers:
+      PRIVATE-TOKEN: "{{ access_token }}"
+      Content-Type: "application/json"
+    body: |
+      {
+        "name":                "quantum",
+        "namespace_id":        {{ namespace_id }},
+        "visibility":          "internal",
+        "default_branch":      "main",
+        "initialize_with_readme": false
+      }
+    body_format: json
+    return_content: yes
+  register: gitlab_create
+  when: not project_exists
+
+- name: "Ensure local directory exists"
+  ansible.builtin.file:
+    path: "./tmp/local_code_path"
+    state: directory
+
+- name: "Initialize Git repo locally if needed"
+  ansible.builtin.command:
+    cmd: git init
+    chdir: "./tmp/local_code_path"
+  args:
+    creates: "./tmp/local_code_path/.git"
+
+- name: "Copy source code into local repo (no overwrite)"
+  ansible.builtin.copy:
+    src: "../clo5-front-main"
+    dest: "./tmp/local_code_path/"
+    remote_src: yes
+    force: no
+
+- name: "Copy source code into local repo (overwrite)"
+  ansible.builtin.copy:
+    src: "../.gitlab-ci.yml"
+    dest: "./tmp/local_code_path/"
+    remote_src: yes
+    force: no
+
+- name: "Create and switch to branch main if necessary"
+  ansible.builtin.command:
+    cmd: git checkout -b main
+    chdir: "./tmp/local_code_path"
+  register: checkout_branch
+  failed_when: false
+  changed_when: "'already exists' not in checkout_branch.stderr"
+
+- name: "Stage and commit all files (initial commit)"
+  ansible.builtin.shell: |
+    git add .
+    git commit -m "Initial commit"
+  args:
+    chdir: "./tmp/local_code_path"
+    creates: "./tmp/local_code_path/.git/COMMIT_EDITMSG"
+  register: commit_result
+  failed_when: 
+    - commit_result.rc != 0 and commit_result.rc != 1
+
+- name: "Add 'origin' remote pointing to GitLab"
+  ansible.builtin.command:
+    cmd: git remote add origin {{ repo_http_url }}
+    chdir: "./tmp/local_code_path"
+  register: add_remote
+  failed_when: false
+  changed_when: add_remote.rc == 0
+
+- name: "Push main branch to GitLab"
+  ansible.builtin.shell:
+    git push -u origin main
+  args:
+    chdir: "./tmp/local_code_path"
+  register: push_result
+  failed_when: push_result.rc != 0
+  changed_when: "'[new branch]' in push_result.stdout or 'Everything up-to-date' not in push_result.stderr"

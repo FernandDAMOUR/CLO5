@@ -1,0 +1,7 @@
+---
+- name: Installer GitLab sur VM1 (bare-metal)
+  hosts: gitlab
+  become: yes
+  roles:
+    - install_gitlab
+    - users_gitlab

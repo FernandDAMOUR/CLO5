@@ -1,0 +1,4 @@
+local_chart_path: "{{ playbook_dir }}/helm-charts/sonarqube"
+remote_chart_path: "/home/elmarg_h/helm-charts/sonarqube"
+namespace: "sonar"
+release_name: "sonarqube"

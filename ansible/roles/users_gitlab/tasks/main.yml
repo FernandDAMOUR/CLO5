@@ -1,0 +1,9 @@
+- name: Add GitLab admin users
+  shell: |
+    gitlab-rails runner 'user = User.create({username:"{{ item.username }}", name:"{{ item.fullname }}", email:"{{ item.email }}", password:"{{ item.password }}", password_confirmation:"{{ item.password }}", admin:true}); user.assign_personal_namespace(Organizations::Organization.default_organization); user.skip_confirmation!; user.save!;'
+  register: create_users_result
+  changed_when: create_users_result.rc == 0  
+  ignore_errors: true
+  failed_when: create_users_result.rc != 0 and create_users_result.rc != 1 
+  loop: "{{ gitlab_admin_users }}"
+  when: inventory_hostname in groups['gitlab']

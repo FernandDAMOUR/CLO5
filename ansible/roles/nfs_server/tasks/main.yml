@@ -1,0 +1,29 @@
+- name: Installer le paquet NFS sur Debian/Ubuntu
+  apt:
+    name: nfs-kernel-server
+    state: present
+    update_cache: yes
+
+- name: Créer le répertoire d’export NFS
+  file:
+    path: "/srv/nfs/data"
+    state: directory
+    owner: nobody
+    group: nogroup
+    mode: "0777"
+
+- name: Ajouter la ligne d’export dans /etc/exports
+  lineinfile:
+    path: /etc/exports
+    line: "/srv/nfs/data 0.0.0.0/0 (rw,sync,no_subtree_check,all_squash,anonuid=65534,anongid=65534)"
+    create: yes
+    state: present
+  notify: Reload NFS exports
+
+- name: Démarrer et activer le service NFS
+  service:
+    name: "'nfs-kernel-server'"
+    state: started
+    enabled: yes
+
+  

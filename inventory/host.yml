@@ -1,0 +1,37 @@
+all:
+  vars:
+    ansible_user: student
+  children:
+    k8s:
+      children:
+        k8s_master:
+          hosts:
+            vm2:
+              ansible_host: 172.16.237.41
+              ansible_ssh_pass: E4ozn81LOOQz
+        k8s_nodes:
+          hosts:
+            vm3:
+              ansible_host: 172.16.237.78
+              ansible_ssh_pass: xltWKKIv7Fjy
+            vm4:
+              ansible_host: 172.16.237.102
+              ansible_ssh_pass: e4NELr1cmjtM
+    gitlab:
+      hosts:
+        vm1:
+          ansible_host: 172.16.237.14
+          ansible_ssh_pass: g7bt4OtWVpbA
+    nfs_server:
+      hosts:
+        vm4:
+          ansible_host: 172.16.237.102
+          ansible_ssh_pass: e4NELr1cmjtM
+    gitlab_runners:
+      hosts:
+        vm2:
+          ansible_host: 172.16.237.41
+          ansible_ssh_pass: E4ozn81LOOQz
+        vm3:
+          ansible_host: 172.16.237.78
+          ansible_ssh_pass: xltWKKIv7Fjy

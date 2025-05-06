@@ -1,0 +1,81 @@
+# variables:
+#   IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+#   REGISTRY: $CI_REGISTRY
+#   PROJECT_IMAGE: $CI_REGISTRY_IMAGE
+
+# stages:
+#   - build
+#   - push
+
+# build_front:
+#   stage: build
+#   tags:
+#     - docker
+#   script:
+#     - cd clo5-front-main
+#     - echo "Building front-end..."
+
+# lint_code:
+#   stage: lint
+#   script:
+#     - echo "Installing dependencies..."
+#     - yarn install --frozen-lockfile
+#     - echo "Running ESLint..."
+#     - yarn lint
+  
+#   artifacts:
+#     paths:
+#       - front/build
+#     expire_in: 1h
+
+variables:
+  IMAGE_TAG: $CI_COMMIT_SHORT_SHA
+  REGISTRY: $CI_REGISTRY
+  PROJECT_IMAGE: $CI_REGISTRY_IMAGE
+
+stages:
+  - build
+  - lint
+  - push
+
+build_front:
+  stage: build
+  tags:
+    - docker
+  script:
+    - cd clo5-front-main
+    - echo "Installing Yarn..."
+    - npm install -g yarn
+    - echo "Building front-end..."
+    - yarn install --frozen-lockfile
+    - yarn build
+  artifacts:
+    paths:
+      - clo5-front-main/build
+    expire_in: 1h
+
+lint_code:
+  stage: lint
+  tags:
+    - docker
+  script:
+    - echo "Installing Yarn..."
+    - npm install -g yarn
+    - echo "Installing dependencies..."
+    - yarn install --frozen-lockfile
+    - echo "Running ESLint..."
+    - yarn lint
+
+push_image:
+  stage: push
+  tags:
+    - docker
+  script:
+    - echo "Logging into the container registry..."
+    - echo $CI_REGISTRY_PASSWORD | docker login -u $CI_REGISTRY_USER $CI_REGISTRY --password-stdin
+    - echo "Building Docker image..."
+    - docker build -t $PROJECT_IMAGE:$IMAGE_TAG .
+    - echo "Pushing Docker image to the registry..."
+    - docker push $PROJECT_IMAGE:$IMAGE_TAG
+  only:
+    - main

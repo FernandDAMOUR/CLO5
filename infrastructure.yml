@@ -1,0 +1,17 @@
+- name: Setup NFS Server on VM4
+  hosts: nfs_server
+  become: true
+  roles:
+    - nfs_server
+
+- name: Deploy Kubernetes Cluster
+  hosts: k8s
+  become: true
+  roles:
+    - kubernetes
+
+- name: Deploy SonarQube on Kubernetes
+  hosts: k8s_master
+  become: true
+  roles:
+    - sonarqube

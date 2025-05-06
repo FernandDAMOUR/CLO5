@@ -1,0 +1,107 @@
+- name: Update and upgrade apt packages
+  become: true
+  apt:
+    upgrade: yes
+    update_cache: yes
+    cache_valid_time: 86400
+
+# - name: Set hostname
+#   ansible.builtin.hostname:
+#     name: "{{ inventory_hostname }}"
+
+- name: Install required packages
+  ansible.builtin.apt:
+    name: "{{ item }}" 
+    state: present
+  loop_control:
+    loop_var: item
+  loop:
+    - curl
+    - openssh-server
+    - ca-certificates
+    - tzdata
+    - perl
+    - postfix
+
+- name: add GitLab repository
+  shell: |
+    curl https://packages.gitlab.com/install/repositories/gitlab/gitlab-ce/script.deb.sh | bash
+  args:
+    creates: /etc/apt/sources.list.d/gitlab_gitlab-ce.list
+
+- name: check if gitlab is installed
+  ansible.builtin.stat:
+    path: /opt/gitlab/embedded/service/gitlab-rails
+  register: gitlab_installed
+
+- name: install GitLab
+  ansible.builtin.apt:
+    name: "gitlab-ce"
+    state: present
+  environment:
+    EXTERNAL_URL: "http://{{ ansible_host }}"
+  when: not gitlab_installed.stat.exists
+
+- name: Copie gitlabconfig
+  ansible.builtin.template:
+    src: gitlab.rb.j2
+    dest: /etc/gitlab/gitlab.rb
+    backup: yes
+  notify:
+    - Reconfigure GitLab
+
+- name: Check if cert are generated
+  ansible.builtin.stat:
+    path: /etc/gitlab/trusted-certs/gitlab.key
+  register: certs_generated
+
+- name: Generate self-signed certificate
+  ansible.builtin.command: |
+    openssl req -x509 -nodes -days 3650 -newkey rsa:2048 \
+      -keyout /etc/gitlab/trusted-certs/gitlab.key \
+      -out /etc/gitlab/trusted-certs/gitlab.crt \
+      -subj "/CN=192.168.100.126" \
+      -addext "subjectAltName=IP:192.168.100.126"
+  when: not certs_generated.stat.exists
+
+- name: Récupérer le certificat sur la machine locale
+  ansible.builtin.fetch:
+    src: /etc/gitlab/trusted-certs/gitlab.crt
+    dest: ./certs/  
+    flat: yes
+  
+- name: gitlab reconfigure
+  ansible.builtin.command: gitlab-ctl reconfigure
+  register: reconfigure_result
+  changed_when: false
+  failed_when: reconfigure_result.rc != 0 and "already running" not in reconfigure_result.stderr
+  retries: 3
+  delay: 10
+
+- name: Wait for GitLab
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: 80
+    delay: 10
+    timeout: 300
+
+- name: Check email confirmation setting
+  ansible.builtin.shell: |
+    gitlab-rails runner "puts ApplicationSetting.current.email_confirmation_setting"
+  register: current_email_setting
+  changed_when: false
+  when: inventory_hostname in groups['gitlab']
+
+- name: Disable email confirmation for new users
+  ansible.builtin.shell: |
+    gitlab-rails runner "
+      settings = ApplicationSetting.current
+      settings.email_confirmation_setting = 'off'
+      settings.save!
+      puts 'Email confirmation disabled'
+    "
+  register: disable_emails
+  changed_when: "'Email confirmation disabled' in disable_emails.stdout"
+  when: >
+    inventory_hostname in groups['gitlab'] and
+    current_email_setting.stdout | trim != 'off'
